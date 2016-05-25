@@ -332,7 +332,8 @@ namespace RabbitMQ.Client
             // Our list is in order of preference, the server one is not.
             foreach (AuthMechanismFactory factory in AuthMechanisms)
             {
-                if (mechanismNames.Any<string>(x => string.Equals(x, factory.Name, StringComparison.OrdinalIgnoreCase)))
+                var factoryName = factory.Name;
+                if (mechanismNames.Any<string>(x => string.Equals(x, factoryName, StringComparison.OrdinalIgnoreCase)))
                 {
                     return factory;
                 }
@@ -348,7 +349,7 @@ namespace RabbitMQ.Client
         /// </exception>
         public virtual IConnection CreateConnection()
         {
-            return CreateConnection(new List<string>() { HostName }, null);
+            return CreateConnection(new List<string> { HostName }, null);
         }
 
         /// <summary>
@@ -365,7 +366,7 @@ namespace RabbitMQ.Client
         /// </exception>
         public IConnection CreateConnection(String clientProvidedName)
         {
-            return CreateConnection(new List<string>() { HostName }, clientProvidedName);
+            return CreateConnection(new List<string> { HostName }, clientProvidedName);
         }
 
         /// <summary>
@@ -386,6 +387,16 @@ namespace RabbitMQ.Client
             return CreateConnection(hostnames, null);
         }
 
+        public IConnection CreateConnection(IList<string> hostnames, String clientProvidedName)
+        {
+            return CreateConnection(hostnames.Select(Endpoint.CloneWithHostname).ToList());
+        }
+
+        public IConnection CreateConnection(IList<AmqpTcpEndpoint> endpoints)
+        {
+            return CreateConnection(endpoints, null);
+        }
+
         /// <summary>
         /// Create a connection using a list of hostnames. The first reachable
         /// hostname will be used initially. Subsequent hostname picks are determined
@@ -405,22 +416,25 @@ namespace RabbitMQ.Client
         /// <exception cref="BrokerUnreachableException">
         /// When no hostname was reachable.
         /// </exception>
-        public IConnection CreateConnection(IList<string> hostnames, String clientProvidedName)
+        public IConnection CreateConnection(IList<AmqpTcpEndpoint> endpoints, String clientProvidedName)
         {
+            var _endpoints = endpoints.ToList();
             IConnection conn;
             try
             {
                 if (AutomaticRecoveryEnabled)
                 {
                     var autorecoveringConnection = new AutorecoveringConnection(this, clientProvidedName);
-                    autorecoveringConnection.Init(hostnames);
+                    autorecoveringConnection.Init(_endpoints.ToList());
                     conn = autorecoveringConnection;
                 }
                 else
                 {
                     IProtocol protocol = Protocols.DefaultProtocol;
-                    var selectedHost = this.HostnameSelector.NextFrom(hostnames);
-                    conn = protocol.CreateConnection(this, false, CreateFrameHandlerForHostname(selectedHost), clientProvidedName);
+                    var hostnames = _endpoints.Select(ep => ep.HostName).ToList();
+                    var selectedHost = HostnameSelector.NextFrom(hostnames);
+                    var selectedEndpoint = _endpoints.First(ep => ep.HostName == selectedHost);
+                    conn = protocol.CreateConnection(this, false, CreateFrameHandler(selectedEndpoint), clientProvidedName);
                 }
             }
             catch (Exception e)
@@ -524,7 +538,7 @@ namespace RabbitMQ.Client
         ///<summary>
         /// Unescape a string, protecting '+'.
         /// </summary>
-        private string UriDecode(string uri)
+        private static string UriDecode(string uri)
         {
             return System.Uri.UnescapeDataString(uri.Replace("+", "%2B"));
         }
